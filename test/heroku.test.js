@@ -1,11 +1,16 @@
 var heroku = require('..');
 
-var deploy = heroku({token: process.env.HEROKU_API_TOKEN, prefix: 'gp'});
+var deploy = heroku({
+  token: process.env.HEROKU_API_TOKEN,
+  prefix: 'gs',
+  drain: 'http://example.com'
+});
 
 var task = {
   repo: 'github-hooks-testing',
   branch: 'master',
-  event: 'push'
+  event: 'push',
+  dir: __dirname + '/../../github-hooks-testing'
 };
 
 function log(str) {
@@ -13,6 +18,5 @@ function log(str) {
 }
 
 deploy(task, log, function(err) {
-  console.log(err);
   if (err) console.error(err.stack || err.message);
 });

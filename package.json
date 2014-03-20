@@ -23,6 +23,7 @@
   "homepage": "https://github.com/camshaft/grappler-deploy-heroku",
   "dependencies": {
     "slide": "~1.1.5",
-    "heroku-client": "~1.2.0"
+    "heroku-client": "~1.2.0",
+    "superagent": "^0.17.0"
   }
 }
