@@ -6,4 +6,4 @@ GEM_HOME=$BIN/../vendor
 
 mkdir -p $GEM_HOME
 
-GEM_HOME=$GEM_HOME GEM_PATH=$GEM_HOME gem install anvil-cli --force --remote --no-document
+GEM_HOME=$GEM_HOME GEM_PATH=$GEM_HOME gem install anvil-cli --no-ri --no-rdoc
