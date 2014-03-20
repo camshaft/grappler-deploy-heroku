@@ -1,0 +1,28 @@
+{
+  "name": "grappler-deploy-heroku",
+  "version": "0.1.0",
+  "description": "Heroku plugin for grappler",
+  "main": "index.js",
+  "scripts": {
+    "test": "NODE_ENV=test ./node_modules/.bin/mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/camshaft/grappler-deploy-heroku.git"
+  },
+  "keywords": [
+    "heroku",
+    "grappler",
+    "deploy"
+  ],
+  "author": "Cameron Bytheway <bytheway.cameron@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/camshaft/grappler-deploy-heroku/issues"
+  },
+  "homepage": "https://github.com/camshaft/grappler-deploy-heroku",
+  "dependencies": {
+    "slide": "~1.1.5",
+    "heroku-client": "~1.2.0"
+  }
+}
