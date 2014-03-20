@@ -43,15 +43,35 @@ module.exports = function(config) {
 
     var app = [prefix, name, branch].join('-');
 
-    chain([
-      [api, 'exists', app, log],
-      [api, 'create', app, last, log],
-      [api, 'enableFeature', app, 'log-runtime-metrics', log],
-      [api, 'enableFeature', app, 'user-env-compile', log],
-      [api, 'addDrain', app, drain, log],
+    if (task.event === 'delete') {
+      if (branch === 'test') return fn(new Error('cannot delete master branch'));
+      return api.delete(app, log, fn);
+    }
+
+    function create(appname, push) {
+      return [
+        [api, 'exists', appname, log],
+        [api, 'create', appname, last, log],
+        [api, 'enableFeature', appname, 'log-runtime-metrics', log],
+        [api, 'enableFeature', appname, 'user-env-compile', log],
+        [api, 'addDrain', appname, drain, log]
+      ].concat(push);
+    }
+
+    chain(create(app, [
       [createSlug, task.dir, log],
-      [api, 'release', app, last, log]
-    ], fn);
+      [api, 'release', app, last, log],
+      [api, 'test', app, log]
+    ]), function(err, res) {
+      if (err) return fn(err);
+      if (branch !== 'test') return fn();
+
+      // Deploy to prod
+      var prod = [prefix, name, 'prod'].join('-');
+      chain(create(prod, [
+        [api, 'release', prod, res[1], log]
+      ]), fn);
+    });
   };
 };
 
@@ -61,7 +81,7 @@ function API(client, token) {
 }
 
 API.prototype.exists = function(app, log, fn) {
-  log('checking app existance');
+  log('checking existance of ' + app);
   this.client.apps(app).info(function(err, info) {
     if (err && err.statusCode === 404) return fn(null, false);
     if (err) return fn(err);
@@ -74,18 +94,20 @@ API.prototype.create = function(app, exists, log, fn) {
   var params = {
     name: app
   };
-  log('creating app ' + app);
+  log('creating ' + app);
   this.client.apps().create(params, fn);
 };
 
 API.prototype.enableFeature = function(app, feature, log, fn) {
-  log('enabling feature ' + feature);
-  this.client.apps(app).features(feature).update({enabled: true}, fn);
+  log('enabling feature ' + feature + ' on ' + app);
+  this.client.apps(app).features(feature).update({enabled: true}, function(err) {
+    fn(err);
+  });
 };
 
 API.prototype.addDrain = function(app, drain, log, fn) {
   if (!drain) return fn();
-  log('adding log drain ' + drain);
+  log('adding log drain ' + drain + ' to ' + app);
   this.client.apps(app).logDrains().create({url: drain}, function(err) {
     if (err && err.statusCode === 422) return fn();
     if (err) return fn(err);
@@ -94,8 +116,10 @@ API.prototype.addDrain = function(app, drain, log, fn) {
 };
 
 API.prototype.release = function(app, url, log, fn) {
-  log('releasing slug');
+  log('releasing slug to ' + app);
+
   var host = 'https://:' + this.token + '@cisaurus.heroku.com';
+
   superagent
     .post(host + '/v1/apps/' + app + '/release')
     .send({description: 'Building from grappler', slug_url: url})
@@ -121,6 +145,18 @@ API.prototype.release = function(app, url, log, fn) {
   }
 };
 
+API.prototype.test = function(app, log, fn) {
+  log('running tests');
+  // TODO
+  // this.client.apps(app).dynos().create({command: '', attach: true, env: {}}, fn);
+  fn();
+}
+
+API.prototype.delete = function(app, log, fn) {
+  log('deleting app ' + app);
+  this.client.apps(app).delete(fn);
+}
+
 function createSlug(dir, log, fn) {
   log('building slug');
   var anvil = spawn(__dirname + '/vendor/bin/anvil', ['build', dir, '-p'], {
@@ -131,7 +167,7 @@ function createSlug(dir, log, fn) {
 
   var url;
   anvil.stdout.on('data', function(data) {
-    url = '' + data;
+    url = ('' + data).replace("\n", '');
   });
 
   anvil.stderr.on('data', function(data) {
