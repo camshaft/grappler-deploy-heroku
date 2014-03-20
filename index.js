@@ -123,7 +123,11 @@ API.prototype.release = function(app, url, log, fn) {
 
 function createSlug(dir, log, fn) {
   log('building slug');
-  var anvil = spawn('heroku', ['build', dir, '-p']);
+  var anvil = spawn(__dirname + '/vendor/bin/anvil', ['build', dir, '-p'], {
+    env: {
+      GEM_HOME: __dirname + '/vendor'
+    }
+  });
 
   var url;
   anvil.stdout.on('data', function(data) {
