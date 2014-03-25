@@ -28,7 +28,6 @@ module.exports = function(config) {
   var client = new Heroku({token: token});
   var api = new API(client, token);
 
-  return deploy;
   return function(app) {
     return app.deploy('heroku', deploy);
   };
