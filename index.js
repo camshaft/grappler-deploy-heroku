@@ -169,7 +169,7 @@ function createSlug(dir, log, fn) {
   });
 
   anvil.stderr.on('data', function(data) {
-    log('' + data, true);
+    log('progress', '' + data);
   });
 
   anvil.on('error', function(err) {
