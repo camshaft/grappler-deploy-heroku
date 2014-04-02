@@ -52,7 +52,6 @@ module.exports = function(config) {
         [api, 'exists', appname, log],
         [api, 'create', appname, last, log],
         [api, 'enableFeature', appname, 'log-runtime-metrics', log],
-        [api, 'enableFeature', appname, 'user-env-compile', log],
         [api, 'addDrain', appname, drain, log]
       ].concat(push);
     }
@@ -170,7 +169,7 @@ function createSlug(dir, log, fn) {
   });
 
   anvil.stderr.on('data', function(data) {
-    log('' + data);
+    log('' + data, true);
   });
 
   anvil.on('error', function(err) {
