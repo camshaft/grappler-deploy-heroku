@@ -5,7 +5,7 @@
 var chain = require('slide').chain;
 var last = chain.last;
 var Heroku = require('heroku-client');
-var spawn = require('child_process').spawn;
+var anvil = require('anvil-cli');
 var superagent = require('superagent');
 
 /**
@@ -64,10 +64,12 @@ module.exports = function(config) {
       if (err) return fn(err);
       if (branch !== 'test') return fn();
 
+      // TODO run unit tests against 'test'
+
       // Deploy to prod
       var prod = [prefix, name, 'prod'].join('-');
       chain(create(prod, [
-        [api, 'release', prod, res[1], log]
+        [api, 'release', prod, res[2], log]
       ]), fn);
     });
   };
@@ -157,30 +159,11 @@ API.prototype.delete = function(app, log, fn) {
 
 function createSlug(dir, log, fn) {
   log('building slug');
-  var anvil = spawn(__dirname + '/vendor/bin/anvil', ['build', dir, '-p'], {
-    env: {
-      GEM_HOME: __dirname + '/vendor'
-    }
-  });
 
-  var url;
-  anvil.stdout.on('data', function(data) {
-    url = ('' + data).replace("\n", '');
-  });
+  var opts = {
+    buildpack: 'https://github.com/ddollar/heroku-buildpack-multi.git',
+    logger: log
+  };
 
-  anvil.stderr.on('data', function(data) {
-    log('progress', '' + data);
-  });
-
-  anvil.on('error', function(err) {
-    if (err.code === 'ENOENT') return log('error', 'missing anvil build tool');
-  });
-
-  anvil.on('close', function(code) {
-    if (code !== 0) return fn(new Error('slug was not compiled'));
-    if (!url) return new Error('missing slug url');
-    setTimeout(function() {
-      fn(null, url);
-    }, 2000);
-  });
+  anvil(dir, opts, fn);
 }
