@@ -1,6 +1,6 @@
 {
   "name": "grappler-deploy-heroku",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Heroku plugin for grappler",
   "main": "index.js",
   "scripts": {
