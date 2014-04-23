@@ -159,7 +159,7 @@ API.prototype.delete = function(app, log, fn) {
   this.client.apps(app).delete(fn);
 }
 
-function createSlug(dir, log, env, fn) {
+function createSlug(dir, env, log, fn) {
   log('building slug');
 
   var opts = {
