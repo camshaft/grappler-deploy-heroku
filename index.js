@@ -9,7 +9,7 @@ var anvil = require('anvil-cli');
 var superagent = require('superagent');
 
 /**
- * Create a GitHub hook
+ * Create a Heroku hook
  *
  * @param {Object} config
  * @return {Function}
@@ -21,6 +21,7 @@ module.exports = function(config) {
   var token = config.token;
   var prefix = config.prefix;
   var drain = config.drain;
+  var env = config.env;
 
   if (!token) throw new Error('missing heroku token');
   if (!prefix) throw new Error('missing heroku prefix');
@@ -57,14 +58,15 @@ module.exports = function(config) {
     }
 
     chain(create(app, [
-      [createSlug, task.dir, log],
+      [createSlug, task.dir, env, log],
       [api, 'release', app, last, log],
       [api, 'test', app, log]
     ]), function(err, res) {
       if (err) return fn(err);
-      if (branch !== 'test') return fn();
 
-      // TODO run unit tests against 'test'
+      // TODO run integration tests
+
+      if (branch !== 'test') return fn();
 
       // Deploy to prod
       var prod = [prefix, name, 'prod'].join('-');
@@ -157,12 +159,13 @@ API.prototype.delete = function(app, log, fn) {
   this.client.apps(app).delete(fn);
 }
 
-function createSlug(dir, log, fn) {
+function createSlug(dir, log, env, fn) {
   log('building slug');
 
   var opts = {
     buildpack: 'https://github.com/ddollar/heroku-buildpack-multi.git',
-    logger: log
+    logger: log,
+    env: env
   };
 
   anvil(dir, opts, fn);
