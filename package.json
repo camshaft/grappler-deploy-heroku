@@ -25,6 +25,7 @@
     "slide": "~1.1.5",
     "heroku-client": "~1.2.0",
     "superagent": "^0.17.0",
-    "anvil-cli": "^0.1.0"
+    "anvil-cli": "^0.1.0",
+    "p-each": "^0.1.0"
   }
 }

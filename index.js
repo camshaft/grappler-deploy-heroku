@@ -7,6 +7,9 @@ var last = chain.last;
 var Heroku = require('heroku-client');
 var anvil = require('anvil-cli');
 var superagent = require('superagent');
+var each = require('p-each');
+
+var APP_NAME_LENGTH = 30;
 
 /**
  * Create a Heroku hook
@@ -20,8 +23,6 @@ module.exports = function(config) {
 
   var token = config.token;
   var prefix = config.prefix;
-  var drain = config.drain;
-  var env = config.env;
 
   if (!token) throw new Error('missing heroku token');
   if (!prefix) throw new Error('missing heroku prefix');
@@ -30,59 +31,51 @@ module.exports = function(config) {
   var api = new API(client, token);
 
   return function(app) {
-    return app.deploy('heroku', deploy);
+    app.deploy('heroku', deploy);
+    app.test('heroku', test);
+
+    app.on('task', function(task) {
+      task.on('deleted', function() {
+        remove(task, task.createLogger('heroku'));
+      });
+    });
   };
 
   function deploy(task, log, fn) {
-    var name = task.repo.replace(/-/g, '');
-    var branch = task.branch.replace(/-/g, '');
+    task.info.app = createName(prefix, task);
 
-    if (branch === 'prod' || branch === 'test') return fn(new Error('cannot deploy reserved branch ' + branch));
+    chain([
+      [api, 'exists', task, log],
+      [api, 'create', last, task, log],
+      [api, 'enableFeature', 'log-runtime-metrics', task, log],
+      [api, 'addDrains', task, log],
+      [createSlug, task, log],
+      [api, 'release', task, log]
+    ], fn);
+  }
 
-    if (branch === 'master') branch = 'test';
+  function remove(task, log) {
+    task.info.app = createName(prefix, task);
+    api.remove(task, log);
+  }
 
-    var app = [prefix, name, branch].join('-');
-
-    if (task.event === 'delete') {
-      if (branch === 'test') return fn(new Error('cannot delete master branch'));
-      return api.delete(app, log, fn);
-    }
-
-    function create(appname, push) {
-      return [
-        [api, 'exists', appname, log],
-        [api, 'create', appname, last, log],
-        [api, 'enableFeature', appname, 'log-runtime-metrics', log],
-        [api, 'addDrain', appname, drain, log]
-      ].concat(push);
-    }
-
-    chain(create(app, [
-      [createSlug, task.dir, env, log],
-      [api, 'release', app, last, log],
-      [api, 'test', app, log]
-    ]), function(err, res) {
-      if (err) return fn(err);
-
-      // TODO run integration tests
-
-      if (branch !== 'test') return fn();
-
-      // Deploy to prod
-      var prod = [prefix, name, 'prod'].join('-');
-      chain(create(prod, [
-        [api, 'release', prod, res[2], log]
-      ]), fn);
-    });
-  };
+  function test(task, log, fn) {
+    // TODO run the tests on heroku
+  }
 };
+
+function createName(prefix, task) {
+  // TODO hash the task info (env, buildpack, etc) as well
+  return (prefix + '-' + task.sha).slice(0, APP_NAME_LENGTH);
+}
 
 function API(client, token) {
   this.client = client;
   this.token = token;
 }
 
-API.prototype.exists = function(app, log, fn) {
+API.prototype.exists = function(task, log, fn) {
+  var app = task.info.app;
   log('checking existance of ' + app);
   this.client.apps(app).info(function(err, info) {
     if (err && err.statusCode === 404) return fn(null, false);
@@ -91,8 +84,9 @@ API.prototype.exists = function(app, log, fn) {
   });
 };
 
-API.prototype.create = function(app, exists, log, fn) {
+API.prototype.create = function(exists, task, log, fn) {
   if (exists) return fn();
+  var app = task.info.app;
   var params = {
     name: app
   };
@@ -100,24 +94,36 @@ API.prototype.create = function(app, exists, log, fn) {
   this.client.apps().create(params, fn);
 };
 
-API.prototype.enableFeature = function(app, feature, log, fn) {
+API.prototype.enableFeature = function(feature, task, log, fn) {
+  var app = task.info.app;
   log('enabling feature ' + feature + ' on ' + app);
   this.client.apps(app).features(feature).update({enabled: true}, function(err) {
     fn(err);
   });
 };
 
-API.prototype.addDrain = function(app, drain, log, fn) {
-  if (!drain) return fn();
-  log('adding log drain ' + drain + ' to ' + app);
-  this.client.apps(app).logDrains().create({url: drain}, function(err) {
-    if (err && err.statusCode === 422) return fn();
-    if (err) return fn(err);
-    fn();
-  });
+API.prototype.addDrains = function(task, log, fn) {
+  var drains = task.info.drains;
+  if (!drains) return fn();
+
+  if (!Array.isArray(drains)) drains = [drains];
+  var app = task.info.app;
+
+  var client = this.client;
+
+  each(drains, function(drain, fn) {
+    log('adding log drain ' + drain + ' to ' + app);
+    client.apps(app).logDrains().create({url: drain}, function(err) {
+      if (err && err.statusCode === 422) return fn();
+      if (err) return fn(err);
+      fn();
+    });
+  }, fn);
 };
 
-API.prototype.release = function(app, url, log, fn) {
+API.prototype.release = function(task, log, fn) {
+  var app = task.info.app;
+  var url = task.info.slug;
   log('releasing slug to ' + app);
 
   var host = 'https://:' + this.token + '@cisaurus.heroku.com';
@@ -147,19 +153,28 @@ API.prototype.release = function(app, url, log, fn) {
   }
 };
 
-API.prototype.test = function(app, log, fn) {
-  log('running tests');
+API.prototype.test = function(task, log, fn) {
+  var test = task.info.test;
+  if (!test) return fn();
+  var app = task.info.app;
+
+  log('running test command: ' + test);
+
   // TODO
   // this.client.apps(app).dynos().create({command: '', attach: true, env: {}}, fn);
+
   fn();
 }
 
-API.prototype.delete = function(app, log, fn) {
+API.prototype.delete = function(task, log, fn) {
+  var app = task.info.app;
   log('deleting app ' + app);
   this.client.apps(app).delete(fn);
 }
 
-function createSlug(dir, env, log, fn) {
+function createSlug(task, log, fn) {
+  var dir = task.dir;
+  var env = task.info.env;
   log('building slug');
 
   var opts = {
@@ -168,5 +183,9 @@ function createSlug(dir, env, log, fn) {
     env: env
   };
 
-  anvil(dir, opts, fn);
+  anvil(dir, opts, function(err, slug) {
+    if (err) return fn(err);
+    task.info.slug = slug;
+    fn();
+  });
 }
