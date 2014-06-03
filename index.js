@@ -4,10 +4,9 @@
 
 var chain = require('slide').chain;
 var last = chain.last;
-var Heroku = require('heroku-client');
 var anvil = require('anvil-cli');
-var superagent = require('superagent');
-var each = require('p-each');
+var API = require('./api');
+var write = require('fs').writeFile;
 
 var APP_NAME_LENGTH = 30;
 
@@ -27,8 +26,7 @@ module.exports = function(config) {
   if (!token) throw new Error('missing heroku token');
   if (!prefix) throw new Error('missing heroku prefix');
 
-  var client = new Heroku({token: token});
-  var api = new API(client, token);
+  var api = new API(token);
 
   return function(app) {
     app.deploy('heroku', deploy);
@@ -38,20 +36,38 @@ module.exports = function(config) {
       task.on('deleted', function() {
         remove(task, task.createLogger('heroku'));
       });
+
+      task.use(function(task, done) {
+        var buildpacks = task.info.buildpacks;
+        if (!Array.isArray(buildpacks)) return done();
+        task.info.buildpacks = 'https://github.com/ddollar/heroku-buildpack-multi.git';
+        var out = task.dir + '/.buildpacks';
+        write(out, buildpacks.join('\n'), done);
+      });
     });
   };
 
   function deploy(task, log, fn) {
     task.info.app = createName(prefix, task);
 
+    // TODO handle multi region
+
     chain([
       [api, 'exists', task, log],
       [api, 'create', last, task, log],
-      [api, 'enableFeature', 'log-runtime-metrics', task, log],
+      [api, 'enableFeatures', task, log],
+      [api, 'addCollaborators', task, log],
       [api, 'addDrains', task, log],
+      [api, 'provisionResources', task, log],
+      [api, 'setErrorPage', task, log],
+      [api, 'setEnv', task, log],
+      [api, 'addDomains', task, log],
       [createSlug, task, log],
       [api, 'release', task, log]
-    ], fn);
+    ], function(err) {
+      if (err) log('' + (err.stack || err));
+      fn(err);
+    });
   }
 
   function remove(task, log) {
@@ -60,116 +76,14 @@ module.exports = function(config) {
   }
 
   function test(task, log, fn) {
-    // TODO run the tests on heroku
+    task.info.app = createName(prefix, task);
+    api.test(task, log, fn);
   }
 };
 
 function createName(prefix, task) {
   // TODO hash the task info (env, buildpack, etc) as well
-  return (prefix + '-' + task.sha).slice(0, APP_NAME_LENGTH);
-}
-
-function API(client, token) {
-  this.client = client;
-  this.token = token;
-}
-
-API.prototype.exists = function(task, log, fn) {
-  var app = task.info.app;
-  log('checking existance of ' + app);
-  this.client.apps(app).info(function(err, info) {
-    if (err && err.statusCode === 404) return fn(null, false);
-    if (err) return fn(err);
-    fn(null, true);
-  });
-};
-
-API.prototype.create = function(exists, task, log, fn) {
-  if (exists) return fn();
-  var app = task.info.app;
-  var params = {
-    name: app
-  };
-  log('creating ' + app);
-  this.client.apps().create(params, fn);
-};
-
-API.prototype.enableFeature = function(feature, task, log, fn) {
-  var app = task.info.app;
-  log('enabling feature ' + feature + ' on ' + app);
-  this.client.apps(app).features(feature).update({enabled: true}, function(err) {
-    fn(err);
-  });
-};
-
-API.prototype.addDrains = function(task, log, fn) {
-  var drains = task.info.drains;
-  if (!drains) return fn();
-
-  if (!Array.isArray(drains)) drains = [drains];
-  var app = task.info.app;
-
-  var client = this.client;
-
-  each(drains, function(drain, fn) {
-    log('adding log drain ' + drain + ' to ' + app);
-    client.apps(app).logDrains().create({url: drain}, function(err) {
-      if (err && err.statusCode === 422) return fn();
-      if (err) return fn(err);
-      fn();
-    });
-  }, fn);
-};
-
-API.prototype.release = function(task, log, fn) {
-  var app = task.info.app;
-  var url = task.info.slug;
-  log('releasing slug to ' + app);
-
-  var host = 'https://:' + this.token + '@cisaurus.heroku.com';
-
-  superagent
-    .post(host + '/v1/apps/' + app + '/release')
-    .send({description: 'Building from grappler', slug_url: url})
-    .end(function(err, res) {
-      if (err) return fn(err);
-      if (res.status === 202) return poll(res.header['location']);
-      if (res.error) return fn(new Error(res.body ? res.body.error : res.text));
-      fn(null);
-    });
-
-  function poll(location) {
-    setTimeout(function() {
-      superagent
-        .get(host + location)
-        .end(function(err, res) {
-          if (err) return fn(err);
-          if (res.status === 202) return poll(location);
-          if (res.error) return fn(new Error(res.text));
-          log('release ' + res.body.release);
-          fn(null);
-        });
-    }, 2000);
-  }
-};
-
-API.prototype.test = function(task, log, fn) {
-  var test = task.info.test;
-  if (!test) return fn();
-  var app = task.info.app;
-
-  log('running test command: ' + test);
-
-  // TODO
-  // this.client.apps(app).dynos().create({command: '', attach: true, env: {}}, fn);
-
-  fn();
-}
-
-API.prototype.delete = function(task, log, fn) {
-  var app = task.info.app;
-  log('deleting app ' + app);
-  this.client.apps(app).delete(fn);
+  return (prefix + '-' + task.info.sha).slice(0, APP_NAME_LENGTH);
 }
 
 function createSlug(task, log, fn) {
@@ -178,12 +92,12 @@ function createSlug(task, log, fn) {
   log('building slug');
 
   var opts = {
-    buildpack: 'https://github.com/ddollar/heroku-buildpack-multi.git',
+    buildpack: task.info.buildpacks,
     logger: log,
     env: env
   };
 
-  anvil(dir, opts, function(err, slug) {
+  anvil(dir, opts, function(err, slug, cache) {
     if (err) return fn(err);
     task.info.slug = slug;
     fn();
